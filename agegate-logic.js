@@ -194,9 +194,9 @@
     setLoading(true);
 
     // 1. Collect DOB fields
-    const monthEl = document.querySelector("[fb-age-gate-field='month']");
-    const dayEl = document.querySelector("[fb-age-gate-field='day']");
-    const yearEl = document.querySelector("[fb-age-gate-field='year']");
+    const monthEl = document.querySelector("[data-agegate-field='month']");
+    const dayEl = document.querySelector("[data-agegate-field='day']");
+    const yearEl = document.querySelector("[data-agegate-field='year']");
 
     if (!monthEl || !dayEl || !yearEl) {
       showError("Could not find date fields. Please refresh and try again.");
@@ -313,7 +313,7 @@
     }
 
     // Bind submit to the enter button
-    const enterBtn = document.querySelector("[fb-age-gate-button='enter'], .age-gate-button");
+    const enterBtn = document.querySelector("[data-agegate-button='enter']");
     if (enterBtn) {
       enterBtn.addEventListener("click", handleSubmit);
     }
