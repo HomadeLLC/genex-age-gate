@@ -32,11 +32,10 @@
   const SESSION_KEY = "genex_age_verified";
   const SESSION_STATE_KEY = "genex_detected_state";
 
-  // Finds the overlay — ID first, then Webflow class fallbacks
+  // Finds the overlay — ID first, then exact Webflow-rendered class
   function getOverlay() {
     return (
       document.getElementById("age-gate-overlay") ||
-      document.querySelector("[class*=\"age-gate\"][class*=\"wrapper\"]") ||
       document.querySelector(".age-gate")
     );
   }
@@ -175,7 +174,7 @@
   }
 
   function setLoading(isLoading) {
-    const btn = document.querySelector("[data-agegate-button='enter']");
+    const btn = document.querySelector("[data-agegate-button='enter'], [fb-age-gate-button='enter']");
     if (!btn) return;
     btn.textContent = isLoading ? "Verifying..." : "Enter Website";
     btn.style.opacity = isLoading ? "0.6" : "1";
@@ -203,9 +202,9 @@
     setLoading(true);
 
     // 1. Collect DOB fields
-    const monthEl = document.querySelector("[data-agegate-field='month']");
-    const dayEl = document.querySelector("[data-agegate-field='day']");
-    const yearEl = document.querySelector("[data-agegate-field='year']");
+    const monthEl = document.querySelector("[data-agegate-field='month'], [fb-age-gate-field='month']");
+    const dayEl = document.querySelector("[data-agegate-field='day'], [fb-age-gate-field='day']");
+    const yearEl = document.querySelector("[data-agegate-field='year'], [fb-age-gate-field='year']");
 
     if (!monthEl || !dayEl || !yearEl) {
       showError("Could not find date fields. Please refresh and try again.");
@@ -323,11 +322,11 @@
 
     // Diagnostics — confirm key elements are found in the DOM
     console.info("[AgeGate] Overlay element:", getOverlay());
-    console.info("[AgeGate] Enter button:", document.querySelector("[data-agegate-button='enter']"));
-    console.info("[AgeGate] Month field:", document.querySelector("[data-agegate-field='month']"));
+    console.info("[AgeGate] Enter button:", document.querySelector("[data-agegate-button='enter'], [fb-age-gate-button='enter']"));
+    console.info("[AgeGate] Month field:", document.querySelector("[data-agegate-field='month'], [fb-age-gate-field='month']"));
 
     // Bind submit to the enter button
-    const enterBtn = document.querySelector("[data-agegate-button='enter']");
+    const enterBtn = document.querySelector("[data-agegate-button='enter'], [fb-age-gate-button='enter']");
     if (enterBtn) {
       enterBtn.addEventListener("click", handleSubmit);
     } else {
@@ -344,7 +343,7 @@
     }
 
     // Also support Enter key on year field to trigger submit
-    const yearField = document.querySelector("[data-agegate-field='year']");
+    const yearField = document.querySelector("[data-agegate-field='year'], [fb-age-gate-field='year']");
     if (yearField) {
       yearField.addEventListener("keydown", (e) => {
         if (e.key === "Enter") handleSubmit(e);
