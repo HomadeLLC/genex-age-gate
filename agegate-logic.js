@@ -1,354 +1,202 @@
 /**
- * Genex Peptides — Global Age Gate Logic
- * Version: 1.0.0
+ * Genex Peptides — Age Gate Logic v2.0
  *
- * Depends on window.AGEGATE_CONFIG being set in the header before this script runs.
+ * Requires window.AGEGATE_CONFIG in <head>:
+ *   window.AGEGATE_CONFIG = { minAge: 21 };
  *
- * Config shape:
- *   collectionId    — Webflow CMS collection ID for Age Verification Logs
- *   apiToken        — Webflow CMS API token (write-scoped)
- *   minAge          — Minimum age to allow entry (default: 21)
- *   restrictedStates — { [stateCode]: { blocked: true, reason: string } }
- *
- * Flow:
- *   1. On page load, check sessionStorage — if already verified, show site immediately.
- *   2. Show the age gate overlay.
- *   3. On submit: parse DOB, calculate age, fetch IP geolocation.
- *   4. Apply state rules.
- *   5. Log result to Webflow CMS.
- *   6. Approve → store session flag, hide overlay.
- *      Block → show block message, prevent any further interaction.
+ * DOM expectations (all present in live HTML):
+ *   Overlay:  .age-gate
+ *   Month:    [fb-age-gate-field="month"]  or  #Month
+ *   Day:      [fb-age-gate-field="day"]    or  #Day
+ *   Year:     [fb-age-gate-field="year"]   or  #Year
+ *   Button:   [fb-age-gate-button="enter"]
  */
 
 (function () {
   "use strict";
 
-  // ─── Config ──────────────────────────────────────────────────────────────────
-  const CONFIG = window.AGEGATE_CONFIG || {};
-  const COLLECTION_ID = CONFIG.collectionId || "";
-  const API_TOKEN = CONFIG.apiToken || "";
-  const MIN_AGE = CONFIG.minAge || 21;
-  const RESTRICTED_STATES = CONFIG.restrictedStates || {};
-  const SESSION_KEY = "genex_age_verified";
-  const SESSION_STATE_KEY = "genex_detected_state";
+  const CONFIG   = window.AGEGATE_CONFIG || {};
+  const MIN_AGE  = CONFIG.minAge || 21;
+  const SESS_KEY = "genex_age_verified";
 
-  // Finds the overlay — ID first, then exact Webflow-rendered class
+  // ─── Element helpers ────────────────────────────────────────────────────────
+
   function getOverlay() {
+    return document.querySelector(".age-gate");
+  }
+
+  function getField(name) {
+    // Try custom attribute, then legacy fb attribute, then by id
     return (
-      document.getElementById("age-gate-overlay") ||
-      document.querySelector(".age-gate")
+      document.querySelector("[data-agegate-field='" + name + "']") ||
+      document.querySelector("[fb-age-gate-field='" + name + "']") ||
+      document.getElementById(name.charAt(0).toUpperCase() + name.slice(1))
     );
   }
 
-  // ─── Helpers ─────────────────────────────────────────────────────────────────
-
-  function generateSessionId() {
-    return "sess_" + Math.random().toString(36).substr(2, 12) + "_" + Date.now();
+  function getButton() {
+    return (
+      document.querySelector("[data-agegate-button='enter']") ||
+      document.querySelector("[fb-age-gate-button='enter']")
+    );
   }
 
-  function getOrCreateSessionId() {
-    let sid = sessionStorage.getItem("genex_session_id");
-    if (!sid) {
-      sid = generateSessionId();
-      sessionStorage.setItem("genex_session_id", sid);
-    }
-    return sid;
-  }
+  // ─── Age calculation ────────────────────────────────────────────────────────
 
-  function calculateAge(dob) {
+  function calculateAge(year, month, day) {
     const today = new Date();
-    const birthDate = new Date(dob);
-    let age = today.getFullYear() - birthDate.getFullYear();
-    const m = today.getMonth() - birthDate.getMonth();
-    if (m < 0 || (m === 0 && today.getDate() < birthDate.getDate())) {
-      age--;
-    }
+    const born  = new Date(year, month - 1, day);
+    let age = today.getFullYear() - born.getFullYear();
+    const m = today.getMonth() - born.getMonth();
+    if (m < 0 || (m === 0 && today.getDate() < born.getDate())) age--;
     return age;
   }
 
-  async function detectState() {
-    try {
-      const res = await fetch("https://ipapi.co/json/", { signal: AbortSignal.timeout(4000) });
-      const data = await res.json();
-      return data.region_code || null; // e.g. "NJ", "CA", "TX"
-    } catch {
-      return null;
-    }
-  }
-
-  async function logVerification({ declaredDob, calculatedAge, detectedState, result, consentGiven }) {
-    if (!COLLECTION_ID || !API_TOKEN || API_TOKEN === "00fe6ca7ce4e138fa21895b69c643320cf4365e8588c26420945836f2ba57fd1") {
-      console.warn("[AgeGate] CMS logging skipped — API token not configured.");
-      return;
-    }
-
-    const sessionId = getOrCreateSessionId();
-    const timestamp = new Date().toISOString();
-
-    // Build a human-readable name for the CMS item
-    const itemName = `${result} — ${detectedState || "Unknown"} — ${timestamp.slice(0, 10)}`;
-    const slug = sessionId;
-
-    // Map result string to the option names defined in the CMS field
-    const resultOptionMap = {
-      approved: "Approved",
-      blocked_underage: "Blocked - Underage",
-      blocked_state: "Blocked - Restricted State",
-      flagged: "Flagged for Review",
-    };
-
-    const payload = {
-      fieldData: {
-        name: itemName,
-        slug: slug,
-        "verification-timestamp": timestamp,
-        "declared-dob": declaredDob,
-        "calculated-age": calculatedAge,
-        "detected-state": detectedState || "Unknown",
-        "verification-result": resultOptionMap[result] || "Flagged for Review",
-        "consent-given": consentGiven || false,
-        "session-id": sessionId,
-      },
-      isDraft: false,
-      isArchived: false,
-    };
-
-    try {
-      const res = await fetch(`https://api.webflow.com/v2/collections/${COLLECTION_ID}/items`, {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${API_TOKEN}`,
-          "Content-Type": "application/json",
-          accept: "application/json",
-        },
-        body: JSON.stringify(payload),
-      });
-
-      if (!res.ok) {
-        const err = await res.json();
-        console.error("[AgeGate] CMS log failed:", err);
-      } else {
-        console.info("[AgeGate] Verification logged to CMS.");
-      }
-    } catch (err) {
-      console.error("[AgeGate] CMS log network error:", err);
-    }
-  }
-
-  // ─── UI ──────────────────────────────────────────────────────────────────────
-
-  function showBlockScreen(reason) {
-    const overlay = getOverlay();
-    if (!overlay) return;
-
-    overlay.innerHTML = `
-      <div class="age-gate-block-screen">
-        <div class="age-gate-block-icon">⛔</div>
-        <h2 class="age-gate-block-title">Access Denied</h2>
-        <p class="age-gate-block-message">${reason}</p>
-        <p class="age-gate-block-sub">If you believe this is an error, please contact us directly.</p>
-      </div>
-    `;
-
-    // Permanently block the page underneath
-    document.body.style.overflow = "hidden";
-    document.body.style.pointerEvents = "none";
-    overlay.style.pointerEvents = "all";
-  }
+  // ─── UI ─────────────────────────────────────────────────────────────────────
 
   function showError(msg) {
-    let el = document.getElementById("age-gate-error");
+    let el = document.getElementById("agegate-error");
     if (!el) {
       el = document.createElement("p");
-      el.id = "age-gate-error";
-      el.style.cssText = "color:#e74c3c;font-size:14px;margin-top:8px;text-align:center;";
-      const form = document.getElementById("age-gate-form");
-      if (form) form.appendChild(el);
+      el.id = "agegate-error";
+      el.style.cssText = "color:#e74c3c;font-size:14px;margin-top:10px;text-align:center;width:100%;";
+      const btn = getButton();
+      if (btn && btn.parentNode) btn.parentNode.insertBefore(el, btn.nextSibling);
     }
     el.textContent = msg;
   }
 
   function clearError() {
-    const el = document.getElementById("age-gate-error");
+    const el = document.getElementById("agegate-error");
     if (el) el.textContent = "";
   }
 
-  function setLoading(isLoading) {
-    const btn = document.querySelector("[data-agegate-button='enter'], [fb-age-gate-button='enter']");
-    if (!btn) return;
-    btn.textContent = isLoading ? "Verifying..." : "Enter Website";
-    btn.style.opacity = isLoading ? "0.6" : "1";
-    btn.style.pointerEvents = isLoading ? "none" : "auto";
-  }
-
   function grantAccess() {
-    sessionStorage.setItem(SESSION_KEY, "true");
+    sessionStorage.setItem(SESS_KEY, "true");
     const overlay = getOverlay();
-    if (overlay) {
-      overlay.style.transition = "opacity 0.4s ease";
-      overlay.style.opacity = "0";
-      setTimeout(() => {
-        overlay.style.display = "none";
-        document.body.style.overflow = "";
-      }, 400);
-    }
+    if (!overlay) return;
+    overlay.style.transition = "opacity 0.4s ease";
+    overlay.style.opacity    = "0";
+    setTimeout(function () {
+      overlay.style.display    = "none";
+      document.body.style.overflow = "";
+    }, 420);
   }
 
-  // ─── Main Verification Handler ────────────────────────────────────────────────
+  function showBlocked(msg) {
+    const overlay = getOverlay();
+    if (!overlay) return;
+    overlay.innerHTML =
+      '<div style="display:flex;flex-direction:column;align-items:center;justify-content:center;height:100%;padding:40px;text-align:center;color:#fff;">' +
+        '<div style="font-size:48px;margin-bottom:24px;">&#x26D4;</div>' +
+        '<h2 style="margin-bottom:16px;">Access Denied</h2>' +
+        '<p style="max-width:400px;line-height:1.6;">' + msg + '</p>' +
+      '</div>';
+    document.body.style.overflow      = "hidden";
+    document.body.style.pointerEvents = "none";
+    overlay.style.pointerEvents       = "all";
+  }
 
-  async function handleSubmit(e) {
+  // ─── Submit handler ─────────────────────────────────────────────────────────
+
+  function handleSubmit(e) {
     e.preventDefault();
+    e.stopPropagation();
     clearError();
-    setLoading(true);
 
-    // 1. Collect DOB fields
-    const monthEl = document.querySelector("[data-agegate-field='month'], [fb-age-gate-field='month']");
-    const dayEl = document.querySelector("[data-agegate-field='day'], [fb-age-gate-field='day']");
-    const yearEl = document.querySelector("[data-agegate-field='year'], [fb-age-gate-field='year']");
+    const monthEl = getField("month");
+    const dayEl   = getField("day");
+    const yearEl  = getField("year");
 
     if (!monthEl || !dayEl || !yearEl) {
-      showError("Could not find date fields. Please refresh and try again.");
-      setLoading(false);
+      showError("Date fields not found — please refresh and try again.");
       return;
     }
 
-    const month = monthEl.value.trim().padStart(2, "0");
-    const day = dayEl.value.trim().padStart(2, "0");
-    const year = yearEl.value.trim();
+    const month = parseInt(monthEl.value.trim(), 10);
+    const day   = parseInt(dayEl.value.trim(), 10);
+    const year  = parseInt(yearEl.value.trim(), 10);
 
-    if (!month || !day || !year || year.length !== 4) {
+    if (!month || !day || !year || yearEl.value.trim().length !== 4) {
       showError("Please enter your full date of birth.");
-      setLoading(false);
       return;
     }
 
-    const dob = `${year}-${month}-${day}`;
-    const dobDate = new Date(dob);
-
-    if (isNaN(dobDate.getTime())) {
-      showError("That doesn't look like a valid date. Please check and try again.");
-      setLoading(false);
+    if (month < 1 || month > 12 || day < 1 || day > 31) {
+      showError("Please enter a valid date.");
       return;
     }
 
-    const age = calculateAge(dob);
+    const age = calculateAge(year, month, day);
 
-    // 2. Detect state via IP
-    const detectedState = await detectState();
-    sessionStorage.setItem(SESSION_STATE_KEY, detectedState || "Unknown");
+    if (isNaN(age) || year < 1900 || year > new Date().getFullYear()) {
+      showError("Please enter a valid year.");
+      return;
+    }
 
-    // 3. Check if underage
     if (age < MIN_AGE) {
-      await logVerification({
-        declaredDob: dob,
-        calculatedAge: age,
-        detectedState,
-        result: "blocked_underage",
-        consentGiven: false,
-      });
-      setLoading(false);
-      showBlockScreen(
-        `You must be at least ${MIN_AGE} years of age to access this website.`
-      );
+      showBlocked("You must be at least " + MIN_AGE + " years of age to access this website.");
       return;
     }
 
-    // 4. Check restricted state
-    if (detectedState && RESTRICTED_STATES[detectedState]) {
-      const stateRule = RESTRICTED_STATES[detectedState];
-
-      // NJ special case: parental consent flow (future enhancement hook)
-      const isNJ = detectedState === "NJ";
-
-      if (stateRule.blocked && !isNJ) {
-        await logVerification({
-          declaredDob: dob,
-          calculatedAge: age,
-          detectedState,
-          result: "blocked_state",
-          consentGiven: false,
-        });
-        setLoading(false);
-        showBlockScreen(
-          `We're sorry — due to local regulations, this website is not available in your region (${detectedState}). ${stateRule.reason || ""}`
-        );
-        return;
-      }
-
-      // NJ: log as approved with consent flag (consent UI can be layered later)
-      if (isNJ) {
-        await logVerification({
-          declaredDob: dob,
-          calculatedAge: age,
-          detectedState,
-          result: "approved",
-          consentGiven: true, // Presumed for now; extend with actual consent checkbox if needed
-        });
-        setLoading(false);
-        grantAccess();
-        return;
-      }
-    }
-
-    // 5. Approved
-    await logVerification({
-      declaredDob: dob,
-      calculatedAge: age,
-      detectedState,
-      result: "approved",
-      consentGiven: false,
-    });
-
-    setLoading(false);
     grantAccess();
   }
 
-  // ─── Init ─────────────────────────────────────────────────────────────────────
+  // ─── Init ───────────────────────────────────────────────────────────────────
 
   function init() {
-    // If already verified this session, skip the gate immediately
-    if (sessionStorage.getItem(SESSION_KEY) === "true") {
-      const overlay = getOverlay();
+    const overlay = getOverlay();
+
+    // Defuse Finsweet/Flowbase by stripping their trigger attributes
+    if (overlay) {
+      overlay.removeAttribute("fb-age-gate");
+      overlay.removeAttribute("fb-age-gate-type");
+      overlay.removeAttribute("fb-age-gate-minimum");
+      overlay.removeAttribute("fb-age-gate-redirect");
+    }
+
+    // Already verified this session — hide and exit
+    if (sessionStorage.getItem(SESS_KEY) === "true") {
       if (overlay) overlay.style.display = "none";
       return;
     }
 
-    // Show overlay and lock scroll
-    const overlay = getOverlay();
+    // Show overlay, lock scroll
     if (overlay) {
-      overlay.style.display = "flex";
+      overlay.style.display  = "flex";
+      overlay.style.opacity  = "1";
       document.body.style.overflow = "hidden";
     }
 
-    // Diagnostics — confirm key elements are found in the DOM
-    console.info("[AgeGate] Overlay element:", getOverlay());
-    console.info("[AgeGate] Enter button:", document.querySelector("[data-agegate-button='enter'], [fb-age-gate-button='enter']"));
-    console.info("[AgeGate] Month field:", document.querySelector("[data-agegate-field='month'], [fb-age-gate-field='month']"));
-
-    // Bind submit to the enter button
-    const enterBtn = document.querySelector("[data-agegate-button='enter'], [fb-age-gate-button='enter']");
-    if (enterBtn) {
-      enterBtn.addEventListener("click", handleSubmit);
+    // Wire up the button
+    const btn = getButton();
+    if (btn) {
+      btn.addEventListener("click", handleSubmit);
     } else {
-      console.warn("[AgeGate] Enter button not found — check data-agegate-button attribute.");
+      console.warn("[AgeGate] Enter button not found.");
     }
 
-    // Also intercept the Webflow form native submit event to prevent page reload
-    const ageGateOverlay = getOverlay();
-    if (ageGateOverlay) {
-      const form = ageGateOverlay.querySelector("form");
-      if (form) {
-        form.addEventListener("submit", handleSubmit);
-      }
+    // Wire up the form (prevent native Webflow submit / page reload)
+    if (overlay) {
+      const form = overlay.querySelector("form");
+      if (form) form.addEventListener("submit", handleSubmit);
     }
 
-    // Also support Enter key on year field to trigger submit
-    const yearField = document.querySelector("[data-agegate-field='year'], [fb-age-gate-field='year']");
-    if (yearField) {
-      yearField.addEventListener("keydown", (e) => {
+    // Enter key on Year field
+    const yearEl = getField("year");
+    if (yearEl) {
+      yearEl.addEventListener("keydown", function (e) {
         if (e.key === "Enter") handleSubmit(e);
       });
     }
+
+    console.info("[AgeGate] Initialised.", {
+      overlay: !!overlay,
+      button:  !!btn,
+      month:   !!getField("month"),
+      day:     !!getField("day"),
+      year:    !!getField("year"),
+    });
   }
 
   if (document.readyState === "loading") {
@@ -356,4 +204,5 @@
   } else {
     init();
   }
+
 })();
