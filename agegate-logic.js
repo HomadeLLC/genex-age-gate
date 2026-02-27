@@ -166,7 +166,7 @@
   }
 
   function setLoading(isLoading) {
-    const btn = document.querySelector("[fb-age-gate-button='enter'], .age-gate-button");
+    const btn = document.querySelector("[data-agegate-button='enter']");
     if (!btn) return;
     btn.textContent = isLoading ? "Verifying..." : "Enter Website";
     btn.style.opacity = isLoading ? "0.6" : "1";
@@ -312,14 +312,30 @@
       document.body.style.overflow = "hidden";
     }
 
+    // Diagnostics — confirm key elements are found in the DOM
+    console.info("[AgeGate] Overlay element:", document.getElementById("age-gate-overlay"));
+    console.info("[AgeGate] Enter button:", document.querySelector("[data-agegate-button='enter']"));
+    console.info("[AgeGate] Month field:", document.querySelector("[data-agegate-field='month']"));
+
     // Bind submit to the enter button
     const enterBtn = document.querySelector("[data-agegate-button='enter']");
     if (enterBtn) {
       enterBtn.addEventListener("click", handleSubmit);
+    } else {
+      console.warn("[AgeGate] Enter button not found — check data-agegate-button attribute.");
+    }
+
+    // Also intercept the Webflow form native submit event to prevent page reload
+    const ageGateOverlay = document.getElementById("age-gate-overlay");
+    if (ageGateOverlay) {
+      const form = ageGateOverlay.querySelector("form");
+      if (form) {
+        form.addEventListener("submit", handleSubmit);
+      }
     }
 
     // Also support Enter key on year field to trigger submit
-    const yearField = document.querySelector("[fb-age-gate-field='year']");
+    const yearField = document.querySelector("[data-agegate-field='year']");
     if (yearField) {
       yearField.addEventListener("keydown", (e) => {
         if (e.key === "Enter") handleSubmit(e);
