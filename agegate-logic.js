@@ -69,7 +69,7 @@
   }
 
   async function logVerification({ declaredDob, calculatedAge, detectedState, result, consentGiven }) {
-    if (!COLLECTION_ID || !API_TOKEN || API_TOKEN === "REPLACE_WITH_YOUR_WEBFLOW_API_TOKEN") {
+    if (!COLLECTION_ID || !API_TOKEN || API_TOKEN === "00fe6ca7ce4e138fa21895b69c643320cf4365e8588c26420945836f2ba57fd1") {
       console.warn("[AgeGate] CMS logging skipped — API token not configured.");
       return;
     }
