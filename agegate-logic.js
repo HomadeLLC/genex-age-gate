@@ -32,6 +32,15 @@
   const SESSION_KEY = "genex_age_verified";
   const SESSION_STATE_KEY = "genex_detected_state";
 
+  // Finds the overlay — ID first, then Webflow class fallbacks
+  function getOverlay() {
+    return (
+      document.getElementById("age-gate-overlay") ||
+      document.querySelector("[class*=\"age-gate\"][class*=\"wrapper\"]") ||
+      document.querySelector(".age-gate")
+    );
+  }
+
   // ─── Helpers ─────────────────────────────────────────────────────────────────
 
   function generateSessionId() {
@@ -130,7 +139,7 @@
   // ─── UI ──────────────────────────────────────────────────────────────────────
 
   function showBlockScreen(reason) {
-    const overlay = document.getElementById("age-gate-overlay");
+    const overlay = getOverlay();
     if (!overlay) return;
 
     overlay.innerHTML = `
@@ -175,7 +184,7 @@
 
   function grantAccess() {
     sessionStorage.setItem(SESSION_KEY, "true");
-    const overlay = document.getElementById("age-gate-overlay");
+    const overlay = getOverlay();
     if (overlay) {
       overlay.style.transition = "opacity 0.4s ease";
       overlay.style.opacity = "0";
@@ -300,20 +309,20 @@
   function init() {
     // If already verified this session, skip the gate immediately
     if (sessionStorage.getItem(SESSION_KEY) === "true") {
-      const overlay = document.getElementById("age-gate-overlay");
+      const overlay = getOverlay();
       if (overlay) overlay.style.display = "none";
       return;
     }
 
     // Show overlay and lock scroll
-    const overlay = document.getElementById("age-gate-overlay");
+    const overlay = getOverlay();
     if (overlay) {
       overlay.style.display = "flex";
       document.body.style.overflow = "hidden";
     }
 
     // Diagnostics — confirm key elements are found in the DOM
-    console.info("[AgeGate] Overlay element:", document.getElementById("age-gate-overlay"));
+    console.info("[AgeGate] Overlay element:", getOverlay());
     console.info("[AgeGate] Enter button:", document.querySelector("[data-agegate-button='enter']"));
     console.info("[AgeGate] Month field:", document.querySelector("[data-agegate-field='month']"));
 
@@ -326,7 +335,7 @@
     }
 
     // Also intercept the Webflow form native submit event to prevent page reload
-    const ageGateOverlay = document.getElementById("age-gate-overlay");
+    const ageGateOverlay = getOverlay();
     if (ageGateOverlay) {
       const form = ageGateOverlay.querySelector("form");
       if (form) {
